@@ -2,11 +2,11 @@
 
 # fastq and multiqc
 
-fastqc fastq_file/*
-multiqc fastq_file/* .
+fastqc raw_data_fastq/*
+multiqc raw_data_fastq/* .
 
-# mv html and zip file in other directory
+# move html and zip files in other directory
 
-mkdir fastq_file/multiqc_html_zip
-mv fastq_file/*html multiqc_html_zip
-mv fastq_file/*zip multiqc_html_zip
+mkdir raw_data_fastq/multiqc_html_zip
+mv raw_data_fastq/*html multiqc_html_zip
+mv raw_data_fastq/*zip multiqc_html_zip
