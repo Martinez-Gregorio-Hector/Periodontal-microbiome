@@ -1,0 +1,356 @@
+---
+title: "AlphaDiversityWithClinicalVariables"
+output: html_document
+date: "2025-01-13"
+---
+
+__load library__
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(ggpubr)
+library(reshape2)
+library(ggpubr)
+library(introdataviz)
+library(gridExtra)
+library(readxl)
+```
+
+__importing and cleaning data__
+
+```{r}
+div <- read.csv("../data/divAlfa.csv",sep=",",header = T)
+
+div$DIABETES <- sub("Controles", "Control", div$DIABETES)
+div$DIABETES <- sub("Diabeticos", "Diabetics", div$DIABETES)
+
+div <- melt(div, id.vars = c("ID","EDAD","GENERO","DIABETES","OTRA.ENFERMEDAD",
+                                     "FUMADORES","ETAPA.PERIODONTAL","CEPILLADO"),
+                    variable.name = "DIV")
+
+head(div)
+```
+
+**Apply normality test and stat: Clinical characteristics**
+
+```{r}
+# Step 1: Define normality test function (Shapiro-Wilk for n<50, KS for n>=50)
+decidir_prueba_normalidad <- function(x) {
+  if (length(x) < 50) {
+    return(shapiro.test(x)$p.value)  # Shapiro-Wilk (< 50)
+  } else {
+    return(ks.test(scale(x), "pnorm")$p.value)  # Kolmogorov-Smirnov (>= 50)
+  }
+}
+
+# Step 2: Apply normality test for both groups
+normality_test <- div %>%
+  group_by(DIABETES) %>%
+  summarise(p_value = decidir_prueba_normalidad(value))
+
+# Step 3: Check if all groups follow a normal distribution (p-value > 0.05)
+if (all(normality_test$p_value > 0.05)) {
+  # If all p-values are > 0.05, use t-test
+  test_type <- "t.test"
+} else {
+  # If any p-value <= 0.05, use Wilcoxon test
+  test_type <- "wilcox.test"
+}
+
+# Step 4: Perform statistical test and calculate p-values
+test_results <- div %>%
+  group_by(DIV) %>%
+  summarise(p_value = if (test_type == "t.test") {
+    t_test_res <- t.test(value ~ DIABETES)
+    t_test_res$p.value
+  } else {
+    wilcox_res <- wilcox.test(value ~ DIABETES)
+    wilcox_res$p.value
+  })
+
+# Step 5: Adjust p-values using Benjamini-Hochberg (FDR)
+test_results$p_adjusted <- p.adjust(test_results$p_value, method = "BH")
+test_results
+```
+
+**Plot**
+
+```{r}
+
+colours <- c("#0000CD", "#FF3030")
+rain_height <- 0.1
+my_comparisons <- list(
+  c("Control", "Diabetics"))
+
+AlphaDiversityInGroup <- 
+  ggplot(div, aes(x = DIABETES, y = value, fill = DIABETES)) +
+  geom_flat_violin(trim = FALSE, alpha = 0.4, position = position_nudge(x = rain_height + .05)) +
+  geom_point(aes(colour = DIABETES), size = 2, alpha = .5, show.legend = FALSE, position = position_jitter(width = rain_height, height = 0)) +
+  geom_boxplot(width = rain_height, alpha = 0.4, show.legend = FALSE, outlier.shape = NA, position = position_nudge(x = -rain_height * 2)) +
+  stat_summary(fun.data = mean_cl_normal, mapping = aes(color = DIABETES), show.legend = FALSE, position = position_nudge(x = rain_height * 3)) +
+  scale_fill_manual(values = colours, name = "") +
+  scale_colour_manual(values = colours) +
+  facet_wrap(DIV~.,scales = "free_y",
+             labeller = labeller(DIV=c("Shannon"="Shannon",
+                                       "Dominancia"="Dominance",
+                                       "OTUs"="OTUs"))) +
+  theme_classic() +
+  theme(legend.position = "none") +
+  labs(x = "", y = "", title = paste("Test:", ifelse(test_type == "t.test", "T-test", "Wilcoxon"))) +
+  
+  # Statistical stat  (t-test or Wilcoxon)
+  stat_compare_means(method = test_type, comparisons = my_comparisons,label = "p.format")
+
+AlphaDiversityInGroup
+```
+
+```{r}
+# DSplitting data into subsets
+
+div_shannon <- subset(div, DIV == "Shannon")
+div_dominancia <- subset(div, DIV == "Dominancia")
+div_otus <- subset(div, DIV == "OTUs")
+
+
+
+# Create individual graphs for each subset
+p1 <- ggplot(div_shannon, aes(x = DIABETES, y = value, fill = DIABETES)) +
+  geom_flat_violin(trim = FALSE, alpha = 0.6, position = position_nudge(x = rain_height + 0.05)) +
+  geom_point(aes(colour = DIABETES), size = 2, alpha = 0.6, show.legend = FALSE, position = position_jitter(width = rain_height, height = 0)) +
+  geom_boxplot(width = rain_height, alpha = 0.6, show.legend = FALSE, outlier.shape = NA, position = position_nudge(x = -rain_height * 2)) +
+  stat_summary(fun.data = mean_cl_normal, mapping = aes(color = DIABETES), show.legend = FALSE, position = position_nudge(x = rain_height * 3)) +
+  scale_fill_manual(values = colours) +
+  scale_colour_manual(values = colours) +
+  labs(title = "Shannon", x = "", y = "") +
+  theme_classic() +
+  theme(legend.position = "none") +
+  theme(
+    axis.title.x = element_text(size = 20),   
+    axis.title.y = element_text(size = 20),   
+    axis.text.x = element_text(size = 20),   
+    axis.text.y = element_text(size = 20)     
+  )
+  
+
+p2 <- ggplot(div_dominancia, aes(x = DIABETES, y = value, fill = DIABETES)) +
+  geom_flat_violin(trim = FALSE, alpha = 0.6, position = position_nudge(x = rain_height + 0.05)) +
+  geom_point(aes(colour = DIABETES), size = 2, alpha = 0.6, show.legend = FALSE, position = position_jitter(width = rain_height, height = 0)) +
+  geom_boxplot(width = rain_height, alpha = 0.6, show.legend = FALSE, outlier.shape = NA, position = position_nudge(x = -rain_height * 2)) +
+  stat_summary(fun.data = mean_cl_normal, mapping = aes(color = DIABETES), show.legend = FALSE, position = position_nudge(x = rain_height * 3)) +
+  scale_fill_manual(values = colours) +
+  scale_colour_manual(values = colours) +
+  labs(title = "Dominancie", x = "", y = "") +
+  theme_classic() +
+  theme(legend.position = "none") +
+  theme(
+    axis.title.x = element_text(size = 20),   
+    axis.title.y = element_text(size = 20),   
+    axis.text.x = element_text(size = 20),   
+    axis.text.y = element_text(size = 20)     
+  )
+  
+
+p3 <- ggplot(div_otus, aes(x = DIABETES, y = value, fill = DIABETES)) +
+  geom_flat_violin(trim = FALSE, alpha = 0.6, position = position_nudge(x = rain_height + 0.05)) +
+  geom_point(aes(colour = DIABETES), size = 2, alpha = 0.6, show.legend = FALSE, position = position_jitter(width = rain_height, height = 0)) +
+  geom_boxplot(width = rain_height, alpha = 0.6, show.legend = FALSE, outlier.shape = NA, position = position_nudge(x = -rain_height * 2)) +
+  stat_summary(fun.data = mean_cl_normal, mapping = aes(color = DIABETES), show.legend = FALSE, position = position_nudge(x = rain_height * 3)) +
+  scale_fill_manual(values = colours) +
+  scale_colour_manual(values = colours) +
+  labs(title = "OTUs", x = "", y = "") +
+  theme_classic() +
+  theme(legend.position = "none") +
+  theme(
+    axis.title.x = element_text(size = 20),   
+    axis.title.y = element_text(size = 20),   
+    axis.text.x = element_text(size = 20),   
+    axis.text.y = element_text(size = 20)     
+  )
+  
+
+
+AlphaDiversity_figure3A <- grid.arrange(p1, p2, p3, nrow = 1)
+
+ggsave("../plot/AlphaDiversity_figure3A.jpg",AlphaDiversity_figure3A,
+       dpi=300,units = "in", width = 12,height =11)
+
+
+```
+
+
+
+**Smoking**
+Import data
+```{r}
+div <- read_excel("../data/prueba.xlsx")
+head(div)
+```
+
+
+
+
+```{r}
+# Step 1: Define normality test function (Shapiro-Wilk for n<50, KS for n>=50)
+decidir_prueba_normalidad <- function(x) {
+  if (length(x) < 50) {
+    return(shapiro.test(x)$p.value)  # Shapiro-Wilk (< 50)
+  } else {
+    return(ks.test(scale(x), "pnorm")$p.value)  # Kolmogorov-Smirnov (>= 50)
+  }
+}
+
+# Step 2: Apply normality test for both groups
+normality_test <- div %>%
+  group_by(SMOKER_MODIFIED) %>%
+  summarise(p_value = decidir_prueba_normalidad(value))
+
+# Step 3: Check if all groups follow a normal distribution (p-value > 0.05)
+if (all(normality_test$p_value > 0.05)) {
+  # If all p-values are > 0.05, use t-test
+  test_type <- "t.test"
+} else {
+  # If any p-value <= 0.05, use Wilcoxon test
+  test_type <- "wilcox.test"
+}
+
+# Step 4: Perform statistical test and calculate p-values
+test_results <- div %>%
+  group_by(SMOKER_MODIFIED) %>%
+  summarise(p_value = if (test_type == "t.test") {
+    t_test_res <- t.test(value ~ DIABETES)
+    t_test_res$p.value
+  } else {
+    wilcox_res <- wilcox.test(value ~ DIABETES)
+    wilcox_res$p.value
+  })
+
+# Step 5: Adjust p-values using Benjamini-Hochberg (FDR)
+test_results$p_adjusted <- p.adjust(test_results$p_value, method = "BH")
+test_results
+```
+
+
+__plot__
+
+```{r}
+Non_smoker_Shannon_subset <- subset(div, SMOKER_MODIFIED == "Non_smoker_Shannon")
+Non_smoker_Dominancia_subset <- subset(div, SMOKER_MODIFIED == "Non_smoker_Dominancia")
+Non_smoker_OTUs_subset <- subset(div, SMOKER_MODIFIED == "Non_smoker_OTUs")
+Smoker_Shannon_subset <- subset(div, SMOKER_MODIFIED == "Smoker_Shannon")
+Smoker_Dominancia_subset <- subset(div, SMOKER_MODIFIED == "Smoker_Dominancia")
+Smoker_OTUs_subset <- subset(div, SMOKER_MODIFIED == "Smoker_OTUs")
+
+
+# Create individual graphs for each subset
+p1 <- ggplot(Non_smoker_Shannon_subset, aes(x = DIABETES, y = value, fill = DIABETES)) +
+  geom_flat_violin(trim = FALSE, alpha = 0.6, position = position_nudge(x = rain_height + 0.05)) +
+  geom_point(aes(colour = DIABETES), size = 2, alpha = 0.6, show.legend = FALSE, position = position_jitter(width = rain_height, height = 0)) +
+  geom_boxplot(width = rain_height, alpha = 0.6, show.legend = FALSE, outlier.shape = NA, position = position_nudge(x = -rain_height * 2)) +
+  stat_summary(fun.data = mean_cl_normal, mapping = aes(color = DIABETES), show.legend = FALSE, position = position_nudge(x = rain_height * 3)) +
+  scale_fill_manual(values = colours) +
+  scale_colour_manual(values = colours) +
+  labs(title = "Non_smoker_Shannon", x = "", y = "") +
+  theme_classic() +
+  theme(legend.position = "none") +
+  theme(
+    axis.title.x = element_text(size = 20),   
+    axis.title.y = element_text(size = 20),   
+    axis.text.x = element_text(size = 20),   
+    axis.text.y = element_text(size = 20)     
+  )
+
+
+p2 <- ggplot(Non_smoker_Dominancia_subset, aes(x = DIABETES, y = value, fill = DIABETES)) +
+  geom_flat_violin(trim = FALSE, alpha = 0.6, position = position_nudge(x = rain_height + 0.05)) +
+  geom_point(aes(colour = DIABETES), size = 2, alpha = 0.6, show.legend = FALSE, position = position_jitter(width = rain_height, height = 0)) +
+  geom_boxplot(width = rain_height, alpha = 0.6, show.legend = FALSE, outlier.shape = NA, position = position_nudge(x = -rain_height * 2)) +
+  stat_summary(fun.data = mean_cl_normal, mapping = aes(color = DIABETES), show.legend = FALSE, position = position_nudge(x = rain_height * 3)) +
+  scale_fill_manual(values = colours) +
+  scale_colour_manual(values = colours) +
+  labs(title = "Non_smoker_Dominance", x = "", y = "") +
+  theme_classic() +
+  theme(legend.position = "none") +
+  theme(
+    axis.title.x = element_text(size = 20),   
+    axis.title.y = element_text(size = 20),   
+    axis.text.x = element_text(size = 20),   
+    axis.text.y = element_text(size = 20)     
+  )
+
+p3 <- ggplot(Non_smoker_OTUs_subset, aes(x = DIABETES, y = value, fill = DIABETES)) +
+  geom_flat_violin(trim = FALSE, alpha = 0.6, position = position_nudge(x = rain_height + 0.05)) +
+  geom_point(aes(colour = DIABETES), size = 2, alpha = 0.6, show.legend = FALSE, position = position_jitter(width = rain_height, height = 0)) +
+  geom_boxplot(width = rain_height, alpha = 0.6, show.legend = FALSE, outlier.shape = NA, position = position_nudge(x = -rain_height * 2)) +
+  stat_summary(fun.data = mean_cl_normal, mapping = aes(color = DIABETES), show.legend = FALSE, position = position_nudge(x = rain_height * 3)) +
+  scale_fill_manual(values = colours) +
+  scale_colour_manual(values = colours) +
+  labs(title = "Non_smoker_OTUs", x = "", y = "") +
+  theme_classic() +
+  theme(legend.position = "none") +
+  theme(
+    axis.title.x = element_text(size = 20),   
+    axis.title.y = element_text(size = 20),   
+    axis.text.x = element_text(size = 20),   
+    axis.text.y = element_text(size = 20)     
+  )
+
+p4 <- ggplot(Smoker_Shannon_subset, aes(x = DIABETES, y = value, fill = DIABETES)) +
+  geom_flat_violin(trim = FALSE, alpha = 0.6, position = position_nudge(x = rain_height + 0.05)) +
+  geom_point(aes(colour = DIABETES), size = 2, alpha = 0.6, show.legend = FALSE, position = position_jitter(width = rain_height, height = 0)) +
+  geom_boxplot(width = rain_height, alpha = 0.6, show.legend = FALSE, outlier.shape = NA, position = position_nudge(x = -rain_height * 2)) +
+  stat_summary(fun.data = mean_cl_normal, mapping = aes(color = DIABETES), show.legend = FALSE, position = position_nudge(x = rain_height * 3)) +
+  scale_fill_manual(values = colours) +
+  scale_colour_manual(values = colours) +
+  labs(title = "Smoker_Shannon", x = "", y = "") +
+  theme_classic() +
+  theme(legend.position = "none") +
+  theme(
+    axis.title.x = element_text(size = 20),   
+    axis.title.y = element_text(size = 20),   
+    axis.text.x = element_text(size = 20),   
+    axis.text.y = element_text(size = 20)     
+  )
+
+
+p5 <- ggplot(Smoker_Dominancia_subset, aes(x = DIABETES, y = value, fill = DIABETES)) +
+  geom_flat_violin(trim = FALSE, alpha = 0.6, position = position_nudge(x = rain_height + 0.05)) +
+  geom_point(aes(colour = DIABETES), size = 2, alpha = 0.6, show.legend = FALSE, position = position_jitter(width = rain_height, height = 0)) +
+  geom_boxplot(width = rain_height, alpha = 0.6, show.legend = FALSE, outlier.shape = NA, position = position_nudge(x = -rain_height * 2)) +
+  stat_summary(fun.data = mean_cl_normal, mapping = aes(color = DIABETES), show.legend = FALSE, position = position_nudge(x = rain_height * 3)) +
+  scale_fill_manual(values = colours) +
+  scale_colour_manual(values = colours) +
+  labs(title = "Smoker_Dominancia", x = "", y = "") +
+  theme_classic() +
+  theme(legend.position = "none") +
+  theme(
+    axis.title.x = element_text(size = 20),   
+    axis.title.y = element_text(size = 20),   
+    axis.text.x = element_text(size = 20),   
+    axis.text.y = element_text(size = 20)     
+  )
+
+p6 <- ggplot(Smoker_OTUs_subset, aes(x = DIABETES, y = value, fill = DIABETES)) +
+  geom_flat_violin(trim = FALSE, alpha = 0.6, position = position_nudge(x = rain_height + 0.05)) +
+  geom_point(aes(colour = DIABETES), size = 2, alpha = 0.6, show.legend = FALSE, position = position_jitter(width = rain_height, height = 0)) +
+  geom_boxplot(width = rain_height, alpha = 0.6, show.legend = FALSE, outlier.shape = NA, position = position_nudge(x = -rain_height * 2)) +
+  stat_summary(fun.data = mean_cl_normal, mapping = aes(color = DIABETES), show.legend = FALSE, position = position_nudge(x = rain_height * 3)) +
+  scale_fill_manual(values = colours) +
+  scale_colour_manual(values = colours) +
+  labs(title = "Smoker_OTUs", x = "", y = "") +
+  theme_classic() +
+  theme(legend.position = "none") +
+  theme(
+    axis.title.x = element_text(size = 20),   
+    axis.title.y = element_text(size = 20),   
+    axis.text.x = element_text(size = 20),   
+    axis.text.y = element_text(size = 20)     
+  )
+
+AlphaDiversity_figure3A <- grid.arrange(p4, p1, p5, p2, p6, p4, nrow = 3)
+
+ggsave("../plot/AlphaDiversity_figure3b.jpg",AlphaDiversity_figure3A,
+       dpi=300,units = "in", width = 8,height = 11)
+
+```
+
